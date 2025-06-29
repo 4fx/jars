@@ -41,28 +41,28 @@ jobs:
         response=$(curl -s -H "User-Agent: $USER_AGENT" \
           "https://fill.papermc.io/v3/projects/$PROJECT/versions/$VERSION/builds")
         
-        # Проверяем наличие ошибки
-        if echo "$response" | jq -e 'has("error")' > /dev/null; then
+        # Проверяем наличие ошибки (если ответ не массив)
+        if echo "$response" | jq -e 'type == "object" and has("error")' > /dev/null; then
           error_msg=$(echo "$response" | jq -r '.error')
           echo "::error ::API error: $error_msg"
           exit 1
         fi
         
+        # Проверяем что ответ - непустой массив
+        if echo "$response" | jq -e 'type != "array" or length == 0' > /dev/null; then
+          echo "::error ::No builds found for $PROJECT $VERSION"
+          exit 1
+        fi
+        
         # Извлекаем последний стабильный билд
         paper_url=$(echo "$response" | jq -r \
-          '.builds | 
-           map(select(.channel == "default")) |
-           sort_by(.build) | 
-           last.downloads.application.name.url')
+          'map(select(.channel == "STABLE")) | 
+           if length > 0 then first.downloads."server:default".url 
+           else first.downloads."server:default".url end')
         
         if [ "$paper_url" = "null" ] || [ -z "$paper_url" ]; then
-          paper_url=$(echo "$response" | jq -r \
-            '.builds[-1].downloads.application.name.url')
-          
-          if [ "$paper_url" = "null" ] || [ -z "$paper_url" ]; then
-            echo "::error ::No builds found for $PROJECT $VERSION"
-            exit 1
-          fi
+          echo "::error ::Failed to extract download URL"
+          exit 1
         fi
         
         echo "url=$paper_url" >> $GITHUB_OUTPUT
