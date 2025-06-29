@@ -37,28 +37,34 @@ jobs:
         VERSION: ${{ github.event.inputs.minecraft_version }}
         USER_AGENT: github-actions-paper-updater/1.0.0
       run: |
-        # Проверка доступности версии
-        version_check=$(curl -s -H "User-Agent: $USER_AGENT" \
+        # Получаем данные о сборках
+        response=$(curl -s -H "User-Agent: $USER_AGENT" \
           "https://fill.papermc.io/v3/projects/$PROJECT/versions/$VERSION/builds")
         
-        if echo "$version_check" | jq -e '.error' > /dev/null; then
-          error_msg=$(echo "$version_check" | jq -r '.error')
-          echo "::error ::Version check failed: $error_msg"
+        # Проверяем наличие ошибки
+        if echo "$response" | jq -e 'has("error")' > /dev/null; then
+          error_msg=$(echo "$response" | jq -r '.error')
+          echo "::error ::API error: $error_msg"
           exit 1
         fi
-
-        # Получение URL последнего стабильного билда
-        build_data=$(curl -s -H "User-Agent: $USER_AGENT" \
-          "https://fill.papermc.io/v3/projects/$PROJECT/versions/$VERSION/builds")
         
-        paper_url=$(echo "$build_data" | jq -r \
-          '.builds[-1] | .downloads.server.default.url')
-
+        # Извлекаем последний стабильный билд
+        paper_url=$(echo "$response" | jq -r \
+          '.builds | 
+           map(select(.channel == "default")) |
+           sort_by(.build) | 
+           last.downloads.application.name.url')
+        
         if [ "$paper_url" = "null" ] || [ -z "$paper_url" ]; then
-          echo "::error ::No builds found for $PROJECT $VERSION"
-          exit 1
+          paper_url=$(echo "$response" | jq -r \
+            '.builds[-1].downloads.application.name.url')
+          
+          if [ "$paper_url" = "null" ] || [ -z "$paper_url" ]; then
+            echo "::error ::No builds found for $PROJECT $VERSION"
+            exit 1
+          fi
         fi
-
+        
         echo "url=$paper_url" >> $GITHUB_OUTPUT
 
     - name: Download PaperMC server
